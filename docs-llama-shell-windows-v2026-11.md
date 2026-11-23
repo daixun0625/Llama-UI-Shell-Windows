@@ -66,6 +66,7 @@ venv pyinstaller --noconfirm llama-shell.spec
 - **列表控件 = TreeList（v5，根治"文字堆叠/无法辨认"）**：本构建 vista 主题下 `ttk.Treeview` 行距**硬编码 ~20px**（168dpi 实测），而 9pt 中字行距 28px → 行距 < 字行距，相邻行文字粘连 8px。关键坑：**`ttk.Style().configure("Treeview", font/padding=…)` 在此构建全部静默失效**（lookup 恒 `''`，行距不变）——v4 的 padding"+27% 行高"实为 0 效果（主人 4 次反馈"没改过"的根因）。解法：`src\treelist.py`（Canvas 自绘、Treeview API 兼容的列表），行高 = 字行距×1.35（168dpi 实测 37px vs 字 28px → 留白 10px）；**仅 Windows 启用**（`gui.py` 构造行 `TreeList if IS_WIN else ttk.Treeview`，Mac 行距正常保持真 Treeview）。PyInstaller spec datas 需显式加 `('treelist.py','.')`（`_internal\` 下，bootstrap 双 sys.path 命中）。
 - **防残影重绘**：窗口 `<Configure>` 防抖 300ms 全量重绘树（PMDv2 缩放/移屏旧文字残影，delete+原 iid 重插，选中态保留）。
 - **v6 按钮同色（主人令）**：run 钮 idle/加载态底色 `#e9eaef`→`#d5d7dd`——初始页四钮（运行/停止/⚡生成指令/复制）统一浅灰 `#d5d7dd`+`#999` 字；状态色不变（就绪绿 `#2e7d32` / 运行中红 `#c62828` / 可用深灰 `#4a5568` / 按下反馈 `#c9cbd4`）。
+- **v7 升级行取消（主人令）**：原独立「llama 升级:」行（upgbar）删除；「检查并升级」按钮移入 engbar 的 vanilla ⋯ 右边（width 10）；版本信息（本地 bX·稳定 bY·最新 bZ / 已中断 / 已安装）改走日志 `[升级]` 行；upg_btn 随 engbar 切页显隐（仅文字页）。回归断言改「升级按钮在 engbar 且无独立升级行」（`upg_btn.master is engbar`、无 `upgbar`/`up_ver_lbl`）。升级功能本体（upgrade_check/下载/解包/bin 轮替/vanilla_bin 回写）不变。
 - 窗口 `_fit_frame` 内容自适应；回退 1560×954；图片页切页恢复文字页尺寸。
 - 诊断方法沉淀：**"文字重叠"先量 bbox 行距 vs 字体行距**（`tree.bbox(iid,col)` 相邻行 y 差 vs `tkfont.Font(root,(fam,sz)).metrics("linespace")`），再像素验证（ImageGrab + 暗像素行带投影）；style 失效时以 lookup 回值为准，不以"我设过"为准。
 

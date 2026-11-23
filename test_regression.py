@@ -15,7 +15,7 @@
  12. 引擎旗标语义：ik 剥 -ngl/--agent/--cache-reuse；MTP 引擎感知；lora 仅 vanilla；cache_ram
  13. build_image_command（-r/--strength 仅 edit_capable；lora 标签；offload >5GB）
  14. sd-cli 默认探测（Windows LocModel 引擎目录）
- 15. 图片页控件齐 + 升级行
+ 15. 图片页控件齐 + 升级按钮在 engbar（无独立升级行）
 """
 import sys, os, re, time, ctypes, json, tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -269,12 +269,14 @@ check("SDCLI_DEFAULT 非空", bool(gui.SDCLI_DEFAULT), gui.SDCLI_DEFAULT)
 if sys.platform == "win32":
     check("Windows sd-cli 默认路径存在", os.path.exists(gui.SDCLI_DEFAULT), gui.SDCLI_DEFAULT)
 
-# 16) 图片页控件齐 + 升级行
+# 16) 图片页控件齐 + 升级按钮（11-23：升级行取消，「检查并升级」移入 engbar vanilla ⋯ 右边）
 check("图片页控件齐", all(hasattr(app, a) for a in
       ("img_prog", "img_prog_lbl", "img_engbar", "lora_pick_dd", "img_last_lbl"))
       and {"prompt", "neg"} <= set(app.itext) and {"aspect", "res", "cfg", "steps",
        "seed", "format", "strength", "ref"} <= set(app.ipv))
-check("升级行存在", hasattr(app, "upg_btn") and hasattr(app, "up_ver_lbl"))
+check("升级按钮在engbar且无独立升级行", hasattr(app, "upg_btn")
+      and app.upg_btn.master is app.engbar and not hasattr(app, "upgbar")
+      and not hasattr(app, "up_ver_lbl"))
 
 ROOT.destroy()
 print()

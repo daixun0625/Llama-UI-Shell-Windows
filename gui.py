@@ -856,7 +856,11 @@ class App:
         self.vanilla_var = tk.StringVar(value=VANILLA_ABS)
         ttk.Entry(engbar, textvariable=self.vanilla_var).pack(side="left", fill="x", expand=True, padx=(0, 2))
         ttk.Button(engbar, text="…", width=3,
-                   command=lambda: self._browse_engine("vanilla")).pack(side="left", padx=(0, 6))
+                   command=lambda: self._browse_engine("vanilla")).pack(side="left", padx=(0, 4))
+        # llama.cpp 联网升级按钮（11-23 主人令：不单独占行，移至 vanilla ⋯ 右边；版本信息走日志）
+        self.upg_btn = ttk.Button(engbar, text="检查并升级", width=10,
+                                  command=self._on_upgrade_click)
+        self.upg_btn.pack(side="left", padx=(0, 6))
         self.tosh_var = tk.StringVar(value=TOSH_ABS)
         if not IS_WIN:   # tosh（Metal）仅 macOS；Windows 双引擎基座隐藏此行（变量保留，供 _apply_engbar 等）
             ttk.Label(engbar, text="tosh:", width=6, anchor="w").pack(side="left")
@@ -871,25 +875,13 @@ class App:
         ttk.Button(engbar, text="应用", width=5,
                    command=self._apply_engbar).pack(side="left")
 
-        # llama.cpp 联网升级行（11-19）：查 GitHub 最新/稳定 → 下载到 bin/llama-bNNNN/
-        # → 配置 vanilla_bin 指向新版（服务即指向新版本）；轮次删除旧版只留最近 1 个。
-        upgbar = ttk.Frame(root)
-        upgbar.pack(fill="x", padx=8, pady=(0, 2))
-        self.upgbar = upgbar
-        self._track_row(upgbar, fill="x", padx=8, pady=(0, 2))
-        ttk.Label(upgbar, text="llama 升级:", width=11, anchor="w").pack(side="left")
-        self.up_ver_lbl = tk.Label(upgbar, text="未检查", anchor="w", padx=6,
-                                    bg="#e8edf5", fg="#16202e",
-                                    font=(MONO, 11), relief="flat")
-        self.up_ver_lbl.pack(side="left", fill="x", expand=True)
-        self.upg_btn = ttk.Button(upgbar, text="检查并升级", width=12,
-                                  command=self._on_upgrade_click)
-        self.upg_btn.pack(side="left", padx=(0, 4))
+        # （11-23 主人令：升级行取消，「检查并升级」已移入上方 engbar 的 vanilla ⋯ 右边，
+        # 版本信息改走日志 [升级] 行；升级功能本体 upgrade_check/_http_download 等保留）
 
         # 模型库路径配置条
         dirbar = ttk.Frame(root)
         dirbar.pack(fill="x", padx=8, pady=(0, 2))
-        self.dirbar = dirbar      # 顶层引擎条（engbar/upgbar/img_engbar）切页归位锚点
+        self.dirbar = dirbar      # 顶层引擎条（engbar/img_engbar）切页归位锚点
         ttk.Label(dirbar, text="模型库:", width=8, anchor="w").pack(side="left")
         self.dir_var = tk.StringVar(value=self.models_dir)
         dir_entry = ttk.Entry(dirbar, textvariable=self.dir_var)
@@ -1448,15 +1440,15 @@ class App:
             self.left.pack(side="top", fill="x")
         else:
             self.left.pack(side="top", fill="both", expand=True)
-        active = ([self.engbar, self.upgbar, self.f_eng, self.f_p, self.f_ovr, self.logf]
+        active = ([self.engbar, self.f_eng, self.f_p, self.f_ovr, self.logf]
                   if page == "text"
                   else [self.img_engbar, self.f_eng_img, self.f_img_top, self.f_img_bot, self.img_previewf])
         # 稳定锚点：每个 page-frame 归位到它 build 时的精确槽位（before= 其后驱共享帧）——
-        #   顶层条(engbar/upgbar/img_engbar) → dirbar 上
+        #   顶层条(engbar/img_engbar) → dirbar 上
         #   参数区(f_eng/f_p 文字 · f_eng_img/f_img_top/f_img_bot 图片) → 预设行 f_ps 上
         #   自定义覆盖 f_ovr（文字专属） → 运行行 acts 上
         #   side=bottom 的 logf/img_previewf 是左列唯一底栏，默认 pack 即可
-        anchor = {self.engbar: self.dirbar, self.upgbar: self.dirbar,
+        anchor = {self.engbar: self.dirbar,
                   self.img_engbar: self.dirbar,
                   self.f_eng: self.f_ps, self.f_p: self.f_ps,
                   self.f_eng_img: self.f_ps, self.f_img_top: self.f_ps, self.f_img_bot: self.f_ps,
@@ -2341,13 +2333,13 @@ class App:
         self.q.put("__UPG_ASK__:" + json.dumps(info, ensure_ascii=False))
 
     def _upg_label(self, info: dict):
-        """升级行版本标签：本地 bX · 稳定 bY · 最新 bZ（缺项省略）。"""
+        """版本信息（11-23 升级行取消后）：写入日志 [升级] 行，不再写行内标签。"""
         seg = []
         seg.append(f"本地 b{info['cur_num']}" if info.get("cur_num") else "本地未知")
         if info.get("stable_num"):
             seg.append(f"稳定 b{info['stable_num']}")
         seg.append(f"最新 b{info['latest_num']}")
-        self.up_ver_lbl.config(text=" · ".join(seg))
+        self._log("[升级] " + " · ".join(seg))
 
     def _ask_upgrade(self, info: dict):
         """主线程：选版本安装（最新；稳定高于本地时才给）。取消 = __UPG_FAIL__ 收尾。"""
@@ -3542,8 +3534,7 @@ class App:
                     self._ask_upgrade(info)
                 elif item.startswith("__UPG_FAIL__:"):
                     msg = item[len("__UPG_FAIL__:")]
-                    self._log(f"[升级] {msg}")
-                    self.up_ver_lbl.config(text="已中断: " + msg[:36])
+                    self._log(f"[升级] 已中断: {msg}")
                     self._upgrading = False
                     self.upg_btn.config(state="normal")
                 elif item.startswith("__UPG_DONE__:"):
@@ -3555,7 +3546,6 @@ class App:
                     self._refresh_engbar()   # 内部同步模块全局 VANILLA_ABS + recommend.VANILLA_BIN（免重启）
                     self._refresh_recommend()   # 立即重生成命令 → cmd 框即刻指向新引擎（不必重启 app）
                     self._log(f"[升级] ✅ 已安装 b{d['num']}: {d['path']}（vanilla_bin 已更新，运行即新版）")
-                    self.up_ver_lbl.config(text=f"已安装 b{d['num']} · 指向新版")
                     self._upgrading = False
                     self.upg_btn.config(state="normal")
                 elif item.startswith("__IMG_SCAN_DONE__:"):
