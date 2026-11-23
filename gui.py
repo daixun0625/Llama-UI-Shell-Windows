@@ -694,9 +694,9 @@ def build_image_command(model: dict, p: dict, out_dir: str, img_engine: str,
         base = 1024
     w, h = _aspect_wh(p.get("aspect", "1:1"), base)
     fmt = (str(p.get("format", "png") or "png").strip() or "png")
-    steps = str(p.get("steps", "16") or "16")
-    cfg = str(p.get("cfg") or "1.1")
-    seed = str(p.get("seed", "-1") or "-1")
+    steps = str(p.get("steps") or "").strip()
+    cfg = str(p.get("cfg") or "").strip()
+    seed = str(p.get("seed") or "").strip()
     prompt = str(p.get("prompt") or "").strip()
     neg = str(p.get("neg") or "").strip()
     os.makedirs(out_dir, exist_ok=True)
@@ -707,9 +707,16 @@ def build_image_command(model: dict, p: dict, out_dir: str, img_engine: str,
            "--llm", model.get("encoder", ""),
            "--vae", model.get("vae", ""),
            "--diffusion-fa", "--vae-tiling", "--params-backend", "te=cpu",
-           "-W", str(w), "-H", str(h),
-           "--steps", steps, "--cfg-scale", cfg, "--seed", seed,
-           "-o", out]
+           "-W", str(w), "-H", str(h)]
+    # 11-23 修复：面板 "default"/空 不下发字面值（sd-cli 报 invalid parameter: "default"，
+    # 如 MiniMax-H3 一选就 rc=1 提错）；省略 flag = 走 sd-cli 内置默认
+    if steps not in ("", "default"):
+        cmd += ["--steps", steps]
+    if cfg not in ("", "default"):
+        cmd += ["--cfg-scale", cfg]
+    if seed not in ("", "default"):
+        cmd += ["--seed", seed]
+    cmd += ["-o", out]
     sam = str(p.get("sampler", "") or "").strip()
     if sam and sam != "default":
         cmd += ["--sampling-method", sam]
@@ -1786,7 +1793,7 @@ class App:
         threading.Thread(target=self._img_reader, daemon=True).start()
         self._set_run_ui(True)
         self.status.config(text="生成中…", foreground="#c77700")
-        self._update_img_progress(0, 0, "加载模型…")
+        self._update_img_progress(0, 100, "加载模型…")   # 统一 0-100 标尺：加载 0-50、采样 50-100
 
     def _img_reader(self):
         import re as _re
@@ -3554,16 +3561,22 @@ class App:
                     import re as _re
                     ms = _re.search(r'(\d+)\s*/\s*(\d+)\s*-\s*[\d.]+\s*(?:s/it|it/s)', item)
                     if ms and hasattr(self, "img_prog") and self.page == "image":
-                        self._update_img_progress(int(ms.group(1)), int(ms.group(2)))
+                        _c, _t = int(ms.group(1)), int(ms.group(2))
+                        self._update_img_progress(50 + min(50, int(_c / max(1, _t) * 50)), 100,
+                                                  note=f"采样 {_c}/{_t} 步")
                 elif item.startswith("__IMG_PROGRESS__:"):
                     _pr = item[len("__IMG_PROGRESS__:"):].split(":")
                     if hasattr(self, "img_prog"):
+                        # 统一 0-100 标尺：加载相位占 0-50、采样相位占 50-100
+                        # （11-23 主人报"一开始就刷全绿然后才从头开始"= 旧版加载走满 453/453 后采样从 1/16 归零跳变）
                         if len(_pr) == 3 and _pr[0] == "L":
-                            # 张量加载相位（GB/s）：进度条按 张量数/总数 走，标签注明
-                            self._update_img_progress(int(_pr[1]), int(_pr[2]),
-                                                      note=f"加载模型 {_pr[1]}/{_pr[2]}")
+                            _c, _t = int(_pr[1]), int(_pr[2])
+                            self._update_img_progress(min(50, int(_c / max(1, _t) * 50)), 100,
+                                                      note=f"加载模型 {_c}/{_t}")
                         elif len(_pr) == 2:
-                            self._update_img_progress(int(_pr[0]), int(_pr[1]))
+                            _c, _t = int(_pr[0]), int(_pr[1])
+                            self._update_img_progress(50 + min(50, int(_c / max(1, _t) * 50)), 100,
+                                                      note=f"采样 {_c}/{_t} 步")
                 elif item.startswith("HEALTH:"):
                     ok = item[7:] == "1"
                     # 状态机：HEALTH 健康 = 系统 ready（运行钮可点亮的门）
@@ -3638,7 +3651,8 @@ class App:
                     self._set_run_ui(False)
                     self._refresh_btns()
                     if hasattr(self, "img_prog"):
-                        self._update_img_progress(1, 1, "完成 ✓" if path else f"失败 rc={rc}")
+                        self._update_img_progress(100 if path else 0, 100,
+                                                 "完成 ✓" if path else f"失败 rc={rc}")
                     if path:
                         self._load_preview(path)
                         self.status.config(text="已生成", foreground="#1a7f37")
