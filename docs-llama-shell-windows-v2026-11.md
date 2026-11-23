@@ -75,7 +75,8 @@ venv pyinstaller --noconfirm llama-shell.spec
   - 现行指向 **b12651**（sha256 `e58fa9a1…` 官方匹配；旧 b12650 留作回退，b12374 目录不动）；回归 +2（版本化目录枚举/轮次函数在位）。
 - **v9 默认参数 + 选中态按钮色（主人令 11-23）**：
   - 面板默认值改：`batch -b` 512→**2048**、`ubatch -ub` 512→**2048**、`image_min_tokens` 256→**1024**、`image_max_tokens` 4096→**2048**、`cache_ram` 8192→**4096**；采样/思考区对齐主人定值：`frequency_penalty` 0→**0.5**、`repeat_last_n` default→**64**（temp 0.75 / top-k 40 / top-p 0.95 / min-p 0.05 / repeat 1.1 / presence 0.05 / seed -1 / reasoning off / jinja on 原已一致）；recommend 推荐计划（选模型时回填）同步统一 `-b 2048 -ub 2048 cache-ram 4096`（原 MoE 最佳 `-b 4096 -ub 1024` 如需可面板手改，按模型持久化）；
-  - 选中模型后（cmd 可用 = ⚡生成/复制 变深灰同态）**运行/停止钮亦变深灰 `#4a5568`**（白字）；未选中初始页四钮仍统一浅灰 `#d5d7dd`；就绪绿/运行中红不变。`_draw_run/_draw_stop` 增 `avail` 参数（`_paint_all` 传 `_cmd_available`），头less 断言四色态 PASS。
+  - 选中模型后（cmd 可用 = ⚡生成/复制 同态）**运行/停止钮亦变深灰 `#4a5568`**（白字）；未选中初始页四钮仍统一浅灰 `#d5d7dd`；就绪绿/运行中红不变。`_draw_run/_draw_stop` 增 `avail` 参数（`_paint_all` 传 `_cmd_available`），头less 断言四色态 PASS。
+- **v10 图片页进度条修（主人报"不反映实际进度"）**：根因 = sd-cli 实际进度行 `|…| CUR/TOT - X.XX(GB/s|s/it|it/s)`，旧正则只匹配 `it/s` → 采样主循环（多为 `s/it`，如 `6/16 - 12.90s/it`）几乎不发进度事件，进度条卡住。修法：`_img_reader` 新正则 `sd_re` 覆盖三单位（真实行 5/5 命中验证）；`GB/s`=张量加载相位发 `L:cur:tot`（进度条按张量数走，标签「加载模型 X/Y」），`s/it|it/s`=采样相位 X/N 步；OUT 兜底分支同步改（排除 GB/s 防张量数误当步数）。
 - 窗口 `_fit_frame` 内容自适应；回退 1560×954；图片页切页恢复文字页尺寸。
 - 诊断方法沉淀：**"文字重叠"先量 bbox 行距 vs 字体行距**（`tree.bbox(iid,col)` 相邻行 y 差 vs `tkfont.Font(root,(fam,sz)).metrics("linespace")`），再像素验证（ImageGrab + 暗像素行带投影）；style 失效时以 lookup 回值为准，不以"我设过"为准。
 
