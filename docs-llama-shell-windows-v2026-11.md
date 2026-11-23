@@ -73,6 +73,9 @@ venv pyinstaller --noconfirm llama-shell.spec
   - 空配置默认探测链 ② 改版本化目录中**编号最高者**（`_find_default_llama_server` 内联扫描 D:\ 顶层，模块级执行不可前向引用 `win_vulkan_builds`）；
   - `current_vanilla_num` 的 `b(\d+)` 正则天然兼容版本化目录；`win_vulkan_builds()` 枚举 D:\ 顶层（版本化目录是兄弟目录，**不在** `D:\llama-vulkan-x64` 之内——11-23 首版枚举写错已修）；
   - 现行指向 **b12651**（sha256 `e58fa9a1…` 官方匹配；旧 b12650 留作回退，b12374 目录不动）；回归 +2（版本化目录枚举/轮次函数在位）。
+- **v9 默认参数 + 选中态按钮色（主人令 11-23）**：
+  - 面板默认值改：`batch -b` 512→**2048**、`ubatch -ub` 512→**2048**、`image_min_tokens` 256→**1024**、`image_max_tokens` 4096→**2048**、`cache_ram` 8192→**4096**；采样/思考区对齐主人定值：`frequency_penalty` 0→**0.5**、`repeat_last_n` default→**64**（temp 0.75 / top-k 40 / top-p 0.95 / min-p 0.05 / repeat 1.1 / presence 0.05 / seed -1 / reasoning off / jinja on 原已一致）；recommend 推荐计划（选模型时回填）同步统一 `-b 2048 -ub 2048 cache-ram 4096`（原 MoE 最佳 `-b 4096 -ub 1024` 如需可面板手改，按模型持久化）；
+  - 选中模型后（cmd 可用 = ⚡生成/复制 变深灰同态）**运行/停止钮亦变深灰 `#4a5568`**（白字）；未选中初始页四钮仍统一浅灰 `#d5d7dd`；就绪绿/运行中红不变。`_draw_run/_draw_stop` 增 `avail` 参数（`_paint_all` 传 `_cmd_available`），头less 断言四色态 PASS。
 - 窗口 `_fit_frame` 内容自适应；回退 1560×954；图片页切页恢复文字页尺寸。
 - 诊断方法沉淀：**"文字重叠"先量 bbox 行距 vs 字体行距**（`tree.bbox(iid,col)` 相邻行 y 差 vs `tkfont.Font(root,(fam,sz)).metrics("linespace")`），再像素验证（ImageGrab + 暗像素行带投影）；style 失效时以 lookup 回值为准，不以"我设过"为准。
 
