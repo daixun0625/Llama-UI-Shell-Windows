@@ -924,7 +924,7 @@ class App:
         ttk.Style().configure("Treeview", padding=(int(2 * self._dsc), int(14 * self._dsc)))
         self._heading_base = {"name": "模型", "b": "B", "kind": "类型", "gb": "GB", "layer": "层"}
         for c, t, w in (("name", "模型", 420), ("b", "B", 44),
-                        ("kind", "类型", 70), ("gb", "GB", 48), ("layer", "层", 48)):
+                        ("kind", "类型", 148), ("gb", "GB", 48), ("layer", "层", 48)):
             self.tree.heading(c, text=t)
             self.tree.column(c, width=max(int(w * self._dsc), 40), anchor="w",
                              stretch=(c == "name"))   # 模型名吃满左栏剩余宽度，防截断
