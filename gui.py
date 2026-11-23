@@ -1149,7 +1149,9 @@ class App:
         acts.pack(fill="x", pady=(0, 0))
         self.acts = acts          # 切页归位锚：自定义覆盖 f_ovr（文字专属）排在其上
 
-        btn_w, btn_h = 150, 42
+        # 尺寸随 DPI 缩放（150×42 定死在 175% 屏上显 ~86×24 虚拟 px，长标签"● 就绪 · 点击启动"溢出）
+        btn_w, btn_h = max(int(150 * self._dsc), 150), max(int(42 * self._dsc), 42)
+        _BTNF = ("Helvetica", 13 if IS_WIN else 11, "bold")   # Windows 高缩放屏大按钮 13pt
         self.run_cv = tk.Canvas(acts, width=btn_w, height=btn_h, highlightthickness=0, bd=0)
         self.run_cv.pack(side="left", padx=(0, 4))
         self.stop_cv = tk.Canvas(acts, width=btn_w, height=btn_h, highlightthickness=0, bd=0)
@@ -1169,7 +1171,7 @@ class App:
         def draw_btn(cv, text, bg, fg, key=None):
             cv.delete("all")
             cv.create_rectangle(0, 0, btn_w, btn_h, fill=bg, outline="")
-            cv.create_text(btn_w/2, btn_h/2, text=text, fill=fg, font=("Helvetica", 11, "bold"))
+            cv.create_text(btn_w/2, btn_h/2, text=text, fill=fg, font=_BTNF)
             if key:
                 self._btn_labels[key] = text
 
@@ -1215,7 +1217,7 @@ class App:
                 c.delete("all")
                 c.create_rectangle(0, 0, btn_w, btn_h, fill="#c9cbd4", outline="")
                 c.create_text(btn_w/2, btn_h/2, text=self._btn_labels[k], fill="#111",
-                              font=("Helvetica", 11, "bold"))
+                              font=_BTNF)
             cv.bind("<ButtonPress-1>", _press, add="+")
         self.run_cv.bind("<Button-1>", lambda e: self._on_run_click(), add="+")
         self.stop_cv.bind("<Button-1>", lambda e: self._on_stop_click(), add="+")
