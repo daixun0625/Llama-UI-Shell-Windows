@@ -119,5 +119,6 @@ venv pyinstaller --noconfirm llama-shell.spec
  2. `MiniMax-H3-Image + Qwen3-VL-4B 需 P-H3-Image 文本连接器 / 或改用 32B 编码器` → 主人选 32B：`_pick_encoder` 改**族前缀逐级匹配**（`minimax_h3_image → minimax_h3` 命中 `qwen3vl_32b_minimax_h3` 18GB 编码器；z-image-turbo 不受影响仍 Qwen3-4B）；
  3. `failed to build VAE runners: requires its 2D image VAE` → VAE 挑选加**族前缀优先**（common/ 先找 `minimax_h3_image_vae_fp16.safetensors`，再 ae.safetensors）；
  4. `failed to encode negative prompt`（32B Qwen3-VL 编码器不接受空负向词）→ `build_image_command` 对 `edit_capable` 模型 neg 留空时注入默认负向词 `blurry, low quality, watermark, text, logo`。
-③ **验证**：h3 条目扫描 = 32B 编码器 + h3 VAE ✓；GUI 形态命令全链路后台生成验证中（11.4GB 扩散 + 18GB 编码器压 32GB 内存，主人知悉接受，慢/顶 G 盘页文件属预期）；回归 42/42。
-出货 @`59e4363`；dist 已重建 + 反斜杠 config 注入。
+ 5. `vae decode: segment 1/25 weight preparation failed`（32B 编码器 18G + 扩散 11.4G 压满资源后，Vulkan VAE 解码分配失败；VAE 文件本身完整）→ A/B 实证 `--backend vae=cpu` 出图（rc=0，generate 183.6s）；`build_image_command` 对 `edit_capable` 模型加 `--backend vae=cpu`（z-image 族不受影响，Vulkan VAE 照旧）。
+③ **验证**：h3 条目扫描 = 32B 编码器 + h3 VAE ✓；**全链路出图 PASS**（GUI 形态命令 rc=0，generate 183.6s，PNG 853KB；首张 `h3_repro/vae_cpu_test.png`）；回归 42/42。
+出货 @`6a27493`（含 vae=cpu 收尾）；dist 已重建 + 反斜杠 config 注入。**h3 已可用**：选 h3 直接生成（慢：采样 ~7s/步 ×20 + VAE 解码，总 ~4–6 分钟/张）。
