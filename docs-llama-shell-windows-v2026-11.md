@@ -9,7 +9,7 @@
 
 | 引擎 | 二进制 | 说明 |
 |---|---|---|
-| vanilla | `D:/llama-vulkan-x64-b12650/llama-server.exe`（**b12650 Vulkan**，11-23 升级；旧 b12374 留 `D:/llama-vulkan-x64` 作回退） | GPU 主力；`-ngl`/`--agent`/`--cache-reuse`/LoRA 全支持。**升级规矩（主人 11-23 定规）：每次升 llama.cpp = 版本化目录 `D:\llama-vulkan-x64-bXXXX` + dist/src 两份 config `vanilla_bin` 指向新目录再出货** |
+| vanilla | `D:/llama-vulkan-x64-b12651/llama-server.exe`（**b12651 Vulkan**，11-23 升级；b12650 留作回退；`D:/llama-vulkan-x64`（b12374）不动） | GPU 主力；`-ngl`/`--agent`/`--cache-reuse`/LoRA 全支持。**升级规矩（主人 11-23 定规）：「检查并升级」落盘 = 版本化目录 `D:\llama-vulkan-x64-bXXXX`（取消 BASE/bin/.dl）+ 保留最近 2 个版本目录滚动删 + 两份 config `vanilla_bin` 指向新目录再出货** |
 | ik | `D:/ik-win/bin/llama-server.exe`（ikawrakow CPU AVX2 自编译） | 纯 CPU；`build_command` 自动剔 `-ngl`/`--agent`/`--cache-reuse`，MTP 映射为 ik 原生语法 `mtp:n_max=1,p_min=0.0`；bench E4B ≈12.3 t/s（8 线程） |
 | tosh | （隐藏，Windows 无此引擎） | `pick_engine` 强制集 = {vanilla, ik}；UI 无 tosh 单选 |
 
@@ -21,7 +21,7 @@
 
 ```json
 {"models_dir": "D:/models",
- "vanilla_bin": "D:/llama-vulkan-x64-b12650/llama-server.exe",
+ "vanilla_bin": "D:/llama-vulkan-x64-b12651/llama-server.exe",
  "ik_bin": "D:/ik-win/bin/llama-server.exe",
  "image_bin": "C:/Users/dx/AppData/Local/LocModel/engines/sd/master-1106-532d2c1-vulkan/sd-cli.exe",
  "vram_override_gb": 8,
@@ -67,6 +67,12 @@ venv pyinstaller --noconfirm llama-shell.spec
 - **防残影重绘**：窗口 `<Configure>` 防抖 300ms 全量重绘树（PMDv2 缩放/移屏旧文字残影，delete+原 iid 重插，选中态保留）。
 - **v6 按钮同色（主人令）**：run 钮 idle/加载态底色 `#e9eaef`→`#d5d7dd`——初始页四钮（运行/停止/⚡生成指令/复制）统一浅灰 `#d5d7dd`+`#999` 字；状态色不变（就绪绿 `#2e7d32` / 运行中红 `#c62828` / 可用深灰 `#4a5568` / 按下反馈 `#c9cbd4`）。
 - **v7 升级行取消（主人令）**：原独立「llama 升级:」行（upgbar）删除；「检查并升级」按钮移入 engbar 的 vanilla ⋯ 右边（width 10）；版本信息（本地 bX·稳定 bY·最新 bZ / 已中断 / 已安装）改走日志 `[升级]` 行；upg_btn 随 engbar 切页显隐（仅文字页）。回归断言改「升级按钮在 engbar 且无独立升级行」（`upg_btn.master is engbar`、无 `upgbar`/`up_ver_lbl`）。升级功能本体（upgrade_check/下载/解包/bin 轮替/vanilla_bin 回写）不变。
+- **v8 升级流改造（主人令：取消 BASE/bin/.dl 默认升级路径，默认 D:/llama-vulkan-x64-b1xxxx/llama-server.exe）**：
+  - 「检查并升级」Windows 落盘改**版本化目录 `D:\llama-vulkan-x64-bNNNN`**（下载进 `<目录>\.dl` → 解包 → zip 顶层若带 `llama-bNNNN/` 自动拍平 → `--version` 校验 → 写 config `vanilla_bin` 指向新版）；macOS 保持 `bin/llama-bNNNN` 不变；
+  - **保留最近 2 个版本目录、滚动删旧**（`rotate_win_vulkan_builds`；正在运行引擎所在目录不删；无 b 后缀的旧生产目录 `D:\llama-vulkan-x64` 不在轮次范围，主人令才动）；
+  - 空配置默认探测链 ② 改版本化目录中**编号最高者**（`_find_default_llama_server` 内联扫描 D:\ 顶层，模块级执行不可前向引用 `win_vulkan_builds`）；
+  - `current_vanilla_num` 的 `b(\d+)` 正则天然兼容版本化目录；`win_vulkan_builds()` 枚举 D:\ 顶层（版本化目录是兄弟目录，**不在** `D:\llama-vulkan-x64` 之内——11-23 首版枚举写错已修）；
+  - 现行指向 **b12651**（sha256 `e58fa9a1…` 官方匹配；旧 b12650 留作回退，b12374 目录不动）；回归 +2（版本化目录枚举/轮次函数在位）。
 - 窗口 `_fit_frame` 内容自适应；回退 1560×954；图片页切页恢复文字页尺寸。
 - 诊断方法沉淀：**"文字重叠"先量 bbox 行距 vs 字体行距**（`tree.bbox(iid,col)` 相邻行 y 差 vs `tkfont.Font(root,(fam,sz)).metrics("linespace")`），再像素验证（ImageGrab + 暗像素行带投影）；style 失效时以 lookup 回值为准，不以"我设过"为准。
 
