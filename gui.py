@@ -731,6 +731,10 @@ def build_image_command(model: dict, p: dict, out_dir: str, img_engine: str,
            "--vae", model.get("vae", ""),
            "--diffusion-fa", "--vae-tiling", "--params-backend", "te=cpu",
            "-W", str(w), "-H", str(h)]
+    if model.get("edit_capable"):
+        # 11-23：MiniMax-H3 族 32B 编码器(18G)+扩散(11.4G) 下 Vulkan VAE 解码
+        # "segment 1/25 weight preparation failed" → VAE 切 CPU 后端（A/B 实证 rc=0）
+        cmd += ["--backend", "vae=cpu"]
     # 11-23 修复：面板 "default"/空 不下发字面值（sd-cli 报 invalid parameter: "default"，
     # 如 MiniMax-H3 一选就 rc=1 提错）；省略 flag = 走 sd-cli 内置默认
     if steps not in ("", "default"):
