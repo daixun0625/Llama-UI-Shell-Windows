@@ -588,7 +588,9 @@ def imagen_prefill(model_basename: str) -> dict:
     return {}
 
 def _pick_encoder(bundle_dir: str, common_dir: str) -> str:
-    """从 common/ 里挑文本编码器：优先文件名含 bundle 主名 token，其次 Qwen3-4B，再次最大。"""
+    """从 common/ 里挑文本编码器：优先文件名含 bundle 主名 token（逐级缩短族前缀，
+    11-23 主人令：minimax-h3-image 族 → qwen3vl_32b_minimax_h3（32B 编码器）），
+    其次 Qwen3-4B，再次最大。"""
     if not os.path.isdir(common_dir):
         return ""
     encs = [f for f in os.listdir(common_dir)
@@ -596,9 +598,15 @@ def _pick_encoder(bundle_dir: str, common_dir: str) -> str:
     if not encs:
         return ""
     token = bundle_dir.lower().replace("-", "_")
-    for e in encs:
-        if token in e.lower().replace("-", "_"):
-            return os.path.join(common_dir, e)
+    parts = token.split("_")
+    # 逐级缩短族前缀匹配（minimax_h3_image → minimax_h3 → minimax；短于 3 字符的跳过防误配）
+    for i in range(len(parts), 0, -1):
+        pre = "_".join(parts[:i])
+        if len(pre) < 3:
+            continue
+        for e in encs:
+            if pre in e.lower().replace("-", "_"):
+                return os.path.join(common_dir, e)
     for e in encs:
         if ("Qwen3-4B" in e) or ("Qwen3VL-4B" in e):
             return os.path.join(common_dir, e)
@@ -653,9 +661,24 @@ def scan_image_models(image_dir: str) -> list:
             vaes, vae = vae_local, vae_local[0]
         else:
             c_vae = os.path.join(common, "ae.safetensors")
-            vaes = ([c_vae] if os.path.isfile(c_vae) else
-                    ([os.path.join(common, f) for f in sorted(os.listdir(common))
-                      if f.endswith(".safetensors")] if os.path.isdir(common) else []))
+            # 11-23：MiniMax-H3 族需专用 2D VAE（sd-cli 强校验，用通用 ae.safetensors 报
+            # "requires its 2D image VAE"）：common/ 池里先找族前缀匹配的 VAE 文件
+            fam_vae = []
+            if os.path.isdir(common):
+                cands = sorted(f for f in os.listdir(common)
+                               if f.endswith(".safetensors") and not f.startswith("._"))
+                fam_tok = d.lower().replace("-", "_").split("_")
+                for i in range(len(fam_tok), 0, -1):
+                    pre = "_".join(fam_tok[:i])
+                    if len(pre) < 3:
+                        continue
+                    fam_vae = [os.path.join(common, f) for f in cands if pre in f.lower()]
+                    if fam_vae:
+                        break
+            base = [c_vae] if os.path.isfile(c_vae) else []
+            rest = ([os.path.join(common, f) for f in sorted(os.listdir(common))
+                     if f.endswith(".safetensors")] if os.path.isdir(common) else [])
+            vaes = fam_vae + [x for x in base + rest if x not in fam_vae]
             vae = vaes[0] if vaes else ""
         entry = {
             "name": disp,
@@ -736,6 +759,10 @@ def build_image_command(model: dict, p: dict, out_dir: str, img_engine: str,
         cmd += ["-p", prompt]
     if neg:
         cmd += ["-n", neg]
+    elif model.get("edit_capable"):
+        # 11-23：MiniMax-H3 族（32B Qwen3-VL 编码器）空负向提示词会报
+        # "failed to encode negative prompt" → 面板 neg 留空时注入默认负向词
+        cmd += ["-n", "blurry, low quality, watermark, text, logo"]
     return cmd, out
 
 
