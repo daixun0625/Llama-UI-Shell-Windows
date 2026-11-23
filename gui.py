@@ -920,6 +920,11 @@ class App:
             self.tree.heading(c, text=t)
             self.tree.column(c, width=max(int(w * self._dsc), 40), anchor="w",
                              stretch=(c == "name"))   # 模型名吃满左栏剩余宽度，防截断
+        # 窗口尺寸/DPI 上下文变化（PMDv2 移屏、拉伸）→ 防抖 300ms 树全量重绘。
+        # Tk8.6 高缩放屏偶发：缩放/移屏后旧文字残影叠在新文字上（"文字堆叠"，仅实机出现，
+        # headless 几何探针查不出——列 bbox 连续无交叠）。重绘=delete+原 iid 重插，选中态保留。
+        self._tree_redraw_id = None
+        root.bind("<Configure>", self._on_win_configure)
         # 排序：点击「模型 / B / 类型 / GB」表头切换升/降序
         self._sort_col = None
         self._sort_reverse = False
@@ -2502,6 +2507,31 @@ class App:
         # 沿用上一次排序状态
         if self._sort_col:
             self._sort_tree()
+
+    def _on_win_configure(self, _e=None):
+        """窗口 <Configure>（拉伸/移屏/DPI 上下文变化）→ 防抖 300ms 后全量重绘树，
+        清除 Tk8.6 PMDv2 缩放/移屏后的文字残影（"堆叠"观感的实机成因）。"""
+        if self._tree_redraw_id is not None:
+            try:
+                self.root.after_cancel(self._tree_redraw_id)
+            except Exception:
+                pass
+        self._tree_redraw_id = self.root.after(300, self._do_tree_repaint)
+
+    def _do_tree_repaint(self):
+        self._tree_redraw_id = None
+        if getattr(self, "_closing", False) or self.page != "text":
+            return
+        sel = list(self.tree.selection())
+        kids = [(iid, self.tree.item(iid, "values")) for iid in self.tree.get_children()]
+        if not kids:
+            return
+        self.tree.delete(*[k[0] for k in kids])
+        for iid, vals in kids:
+            self.tree.insert("", "end", iid=iid, values=list(vals))
+        for s_ in sel:
+            if s_ in dict(kids):
+                self.tree.selection_add(s_)
 
     def _on_heading_click(self, col):
         """点击表头：同列切换升/降；换列时数值列(B/GB)默认降序（大在前）。"""
