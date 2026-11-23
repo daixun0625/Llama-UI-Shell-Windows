@@ -896,13 +896,13 @@ class App:
         # 主区域：grid 两列，左列固定最小宽度，右列自适应
         mid = ttk.Frame(root)
         mid.pack(fill="both", expand=True, padx=6, pady=2)
-        # 左列 760（11-23 主人加宽 v3：最长模型名全显不截断，列表/日志框一并加宽），×_dsc 高 DPI 缩放
-        mid.grid_columnconfigure(0, minsize=int(760 * self._dsc))
+        # 左列 686（11-23 主人定 v4：v3 的 760 收窄 10 字符≈74px；列表/日志框同宽），×_dsc 高 DPI 缩放
+        mid.grid_columnconfigure(0, minsize=int(686 * self._dsc))
         mid.grid_columnconfigure(1, weight=1)
         mid.grid_rowconfigure(0, weight=1)   # 网格行撑满 mid 高 → 图片页参数区(fill/expand)填满、无底部留白
 
         # 左列：模型库 + 日志
-        leftcol = ttk.Frame(mid, width=int(760 * self._dsc))
+        leftcol = ttk.Frame(mid, width=int(690 * self._dsc))
         leftcol.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
         leftcol.pack_propagate(False)
 
@@ -911,6 +911,9 @@ class App:
         left.pack(side="top", fill="both", expand=True)
         cols = ("name", "b", "kind", "gb", "layer")
         self.tree = ttk.Treeview(left, columns=cols, show="headings", height=10)
+        # 行距：默认行高≈字体行高，高分辨率屏上相邻行笔画粘连→"重叠"观感（11-23 主人反馈）。
+        # Treeview padding 垂直分量加高行高（168dpi 实测 pad_v=18→+6px；取 14×_dsc≈24→行高+27%）
+        ttk.Style().configure("Treeview", padding=(int(2 * self._dsc), int(14 * self._dsc)))
         self._heading_base = {"name": "模型", "b": "B", "kind": "类型", "gb": "GB", "layer": "层"}
         for c, t, w in (("name", "模型", 420), ("b", "B", 44),
                         ("kind", "类型", 70), ("gb", "GB", 48), ("layer", "层", 48)):
