@@ -1107,8 +1107,9 @@ def prefill(st: dict, hw: Hardware, kv_type: str = "q8_0") -> dict:
         if best and best != c:
             c, p = best, recommend(st, hw, ctx=best, kv_type=kv_type)
 
-    # 社区最佳（RX 6600 8GB）：MoE prefill-optimized -b 4096 -ub 1024；dense -b 2048 -ub 512
-    _batch, _ubatch = ("4096", "1024") if st.get("is_moe") else ("2048", "512")
+    # 默认参数（11-23 主人定规：统一 -b 2048 -ub 2048、cache-ram 4096；
+    # 图像 min/max 走面板默认 1024/2048。历史 MoE 最佳 -b 4096 -ub 1024 如需可面板手改）
+    _batch, _ubatch = ("2048", "2048")
     pre = {
         "ctx": str(p.get("ctx", c)),
         "cache_type_k": p.get("kv_type", "q8_0"),
@@ -1117,7 +1118,7 @@ def prefill(st: dict, hw: Hardware, kv_type: str = "q8_0") -> dict:
         "threads": "8",          # 本机 -t8 最优（i5 6P/12T；-t12 超订掉速）
         "batch": _batch,
         "ubatch": _ubatch,
-        "cache_ram": "8192",     # 长上下文前缀复用缓存上限（MiB，是上限非预占）
+        "cache_ram": "4096",     # KV 缓存 RAM 上限（MiB，是上限非预占；11-23 主人定 4096）
         "cpu_moe": "off",
         "agent": "on",
         "jinja": "on",

@@ -1057,9 +1057,9 @@ class App:
                 ("moe_cache_mib", "moe-cache-mib",
                  ["default", "0", "512", "1024", "1536", "2048", "2560", "3072", "3584", "4096"], "0"),
                 ("batch", "batch -b",
-                 ["default", "256", "512", "1024", "2048", "4096"], "512"),
+                  ["default", "256", "512", "1024", "2048", "4096"], "2048"),
                 ("ubatch", "ubatch -ub",
-                 ["default", "256", "512", "1024", "2048"], "512"),
+                  ["default", "256", "512", "1024", "2048"], "2048"),
                 ("no_warmup", "no-warmup",
                  ["default", "auto", "off", "on"], "auto"),
                 ("mmproj", "视觉塔 -mm",
@@ -1067,9 +1067,9 @@ class App:
                 ("mmproj_device", "--mmproj-device",
                  ["default", "none", "cpu", "gpu"], "none"),
                 ("image_min_tokens", "图像最小token",
-                 ["default", "256", "512", "1024", "2048"], "256"),
+                  ["default", "256", "512", "1024", "2048"], "1024"),
                 ("image_max_tokens", "图像最大token",
-                 ["default", "1024", "2048", "4096", "8192", "16384"], "4096"),
+                  ["default", "1024", "2048", "4096", "8192", "16384"], "2048"),
                 ("agent", "agent",
                  ["default", "off", "on"], "on"),
             ]),
@@ -1095,7 +1095,7 @@ class App:
                 ("lora", "--lora LoRA（vanilla）",
                  ["default", "off"] + LORA_DISPLAY[1:], "default"),
                 ("cache_ram", "cache-ram -cram (MiB)",
-                 ["default", "1024", "2048", "3072", "4096", "6144", "7168", "8192"], "8192"),
+                  ["default", "1024", "2048", "3072", "4096", "6144", "7168", "8192"], "4096"),
                 ("load_mode", "load-mode -lm",
                  ["default", "auto", "mmap", "mlock", "mmap+mlock", "none"], "auto"),
             ]),
@@ -1214,19 +1214,21 @@ class App:
             if key:
                 self._btn_labels[key] = text
 
-        self._draw_run = lambda running, ready: draw_btn(
+        # 11-23 主人令：选中模型后（cmd 可用，与 ⚡生成/复制 同态）运行/停止亦变深灰 #4a5568；
+        # 未选中时初始页四钮统一浅灰 #d5d7dd；就绪绿/运行中红不变
+        self._draw_run = lambda running, ready, avail: draw_btn(
             self.run_cv,
             "● 就绪 · 运行中" if (running and ready) else (
                 "● 正在加载" if running else
                 ("● 就绪 · 点击启动" if ready else "▶ 运行（加载后启动）")),
-            "#2e7d32" if ready else "#d5d7dd",
-            "white" if ready else "#999", key="run"
+            "#2e7d32" if ready else ("#4a5568" if avail else "#d5d7dd"),
+            "white" if (ready or avail) else "#999", key="run"
         )
-        self._draw_stop = lambda running, ready: draw_btn(
+        self._draw_stop = lambda running, ready, avail: draw_btn(
             self.stop_cv,
             "■ 停止",
-            "#c62828" if (running and ready) else "#d5d7dd",
-            "white" if (running and ready) else "#999", key="stop"
+            "#c62828" if (running and ready) else ("#4a5568" if avail else "#d5d7dd"),
+            "white" if ((running and ready) or avail) else "#999", key="stop"
         )
         # 生成指令 = 复制 同色（深灰 #4a5568，可用时），禁用时同为浅灰 #d5d7dd
         self._draw_gen = lambda avail: draw_btn(
@@ -1243,8 +1245,8 @@ class App:
 
         def _paint_all():
             running = self.proc is not None and self.proc.poll() is None
-            self._draw_run(running, self._ready)
-            self._draw_stop(running, self._ready)
+            self._draw_run(running, self._ready, self._cmd_available)
+            self._draw_stop(running, self._ready, self._cmd_available)
             self._draw_gen(self._cmd_available)
             self._draw_copy(self._cmd_available)
         self._refresh_btns = _paint_all
