@@ -5,7 +5,7 @@ a = Analysis(
     ['gui.py'],
     pathex=[],
     binaries=[],
-    datas=[('recommend.py', '.'), ('gguf_fast.py', '.'), ('gguf_parse.py', '.')],
+    datas=[('recommend.py', '.'), ('gguf_fast.py', '.'), ('gguf_parse.py', '.'), ('treelist.py', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

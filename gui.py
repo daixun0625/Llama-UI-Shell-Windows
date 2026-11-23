@@ -29,6 +29,10 @@ if os.path.isdir(_INTERNAL):
 import gguf_fast, recommend  # noqa: E402
 
 IS_WIN = sys.platform == "win32"
+try:
+    from treelist import TreeList        # Windows 专用：Treeview 行距 bug 的 Canvas 替身
+except ImportError:
+    TreeList = None
 MONO = "Consolas" if IS_WIN else "Menlo"   # 等宽字体按平台（Windows 无 Menlo）
 
 # 平台默认：Windows 双引擎基座（vanilla=主人现役 Vulkan 构建 + ik=本地 AVX2 构建；tosh 不可用）；
@@ -910,7 +914,11 @@ class App:
         self.left = left             # 切页调模型库行数：图片页 5 行（给预览区让位）、文字页 10 行铺满
         left.pack(side="top", fill="both", expand=True)
         cols = ("name", "b", "kind", "gb", "layer")
-        self.tree = ttk.Treeview(left, columns=cols, show="headings", height=10)
+        # Windows：TreeList（Canvas 自绘列表，行高=字行距×1.35）——本构建 Treeview 行距硬编码
+        # 20px < 9pt 字行距 28px，相邻行文字粘连（"堆叠无法辨认"，11-23 主人 4 次反馈）
+        self.tree = (TreeList(left, columns=cols, height=10, show="headings")
+                     if (IS_WIN and TreeList) else
+                     ttk.Treeview(left, columns=cols, show="headings", height=10))
         # 行距：默认行高≈字体行高，高分辨率屏上相邻行笔画粘连→"重叠"观感（11-23 主人反馈）。
         # Treeview padding 垂直分量加高行高（168dpi 实测 pad_v=18→+6px；取 14×_dsc≈24→行高+27%）
         ttk.Style().configure("Treeview", padding=(int(2 * self._dsc), int(14 * self._dsc)))
@@ -1517,6 +1525,7 @@ class App:
                                      "gb": float(gb), "layer": 0}
         if self._sort_col:
             self._sort_tree()
+        self._calibrate_tree_font()
 
     def _rebuild_lora_table(self, loras_dir):
         """按 loras 目录重建 ② 区 LoRA 定制：更新下拉可用 LoRA + 已选列表（各自权重滑杆 + 移除）。
@@ -2507,6 +2516,7 @@ class App:
         # 沿用上一次排序状态
         if self._sort_col:
             self._sort_tree()
+        self._calibrate_tree_font()
 
     def _on_win_configure(self, _e=None):
         """窗口 <Configure>（拉伸/移屏/DPI 上下文变化）→ 防抖 300ms 后全量重绘树，
