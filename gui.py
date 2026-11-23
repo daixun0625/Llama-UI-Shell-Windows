@@ -979,8 +979,9 @@ class App:
                             value=v, command=self._refresh_recommend).pack(side="left", padx=2)
         self.dm_var = tk.BooleanVar(value=False)
         self.dm_var.trace_add("write", lambda *_: self._save_state_entry())
-        ttk.Checkbutton(f_eng, text="--dynamic-moe", variable=self.dm_var,
-                        command=self._refresh_recommend).pack(side="left", padx=(10, 0))
+        if not IS_WIN:   # Windows 二进制无 --dynamic-moe 参数（主人 11-23 确认）；构建器对非 tosh 引擎本就跳过该键（recommend.py 门），此处只藏 UI
+            ttk.Checkbutton(f_eng, text="--dynamic-moe", variable=self.dm_var,
+                            command=self._refresh_recommend).pack(side="left", padx=(10, 0))
         ttk.Label(f_eng, text="端口").pack(side="left", padx=(12, 2))
         self.port_var = tk.StringVar(value="8080")
         ttk.Spinbox(f_eng, from_=1000, to=65535, textvariable=self.port_var,
