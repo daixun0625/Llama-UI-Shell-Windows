@@ -9,7 +9,7 @@
 
 | 引擎 | 二进制 | 说明 |
 |---|---|---|
-| vanilla | `D:/llama-vulkan-x64/llama-server.exe`（b12374 Vulkan） | GPU 主力；`-ngl`/`--agent`/`--cache-reuse`/LoRA 全支持 |
+| vanilla | `D:/llama-vulkan-x64-b12650/llama-server.exe`（**b12650 Vulkan**，11-23 升级；旧 b12374 留 `D:/llama-vulkan-x64` 作回退） | GPU 主力；`-ngl`/`--agent`/`--cache-reuse`/LoRA 全支持。**升级规矩（主人 11-23 定规）：每次升 llama.cpp = 版本化目录 `D:\llama-vulkan-x64-bXXXX` + dist/src 两份 config `vanilla_bin` 指向新目录再出货** |
 | ik | `D:/ik-win/bin/llama-server.exe`（ikawrakow CPU AVX2 自编译） | 纯 CPU；`build_command` 自动剔 `-ngl`/`--agent`/`--cache-reuse`，MTP 映射为 ik 原生语法 `mtp:n_max=1,p_min=0.0`；bench E4B ≈12.3 t/s（8 线程） |
 | tosh | （隐藏，Windows 无此引擎） | `pick_engine` 强制集 = {vanilla, ik}；UI 无 tosh 单选 |
 
@@ -21,7 +21,7 @@
 
 ```json
 {"models_dir": "D:/models",
- "vanilla_bin": "D:/llama-vulkan-x64/llama-server.exe",
+ "vanilla_bin": "D:/llama-vulkan-x64-b12650/llama-server.exe",
  "ik_bin": "D:/ik-win/bin/llama-server.exe",
  "image_bin": "C:/Users/dx/AppData/Local/LocModel/engines/sd/master-1106-532d2c1-vulkan/sd-cli.exe",
  "vram_override_gb": 8,
@@ -62,9 +62,10 @@ venv pyinstaller --noconfirm llama-shell.spec
 
 ## 5. 布局（11-23 主人定规：列表/日志加宽）
 
-- 左栏（模型库+日志框）= **686×`_dsc`**（v4：760 基础上主人令收窄 10 字符≈74px）；树列：模型名 420(stretch 吃满余量) / B 44 / 类型 70 / GB 48 / 层 48（均 ×`_dsc`，min 40）。
+- 左栏（模型库+日志框）= **686×`_dsc`**（v4：760 基础上主人令收窄 10 字符≈74px）；树列（v6 主人令调宽）：模型名 **360**(stretch 吃满余量) / B 44 / 类型 **148** / GB 48 / 层 48（均 ×`_dsc`，min 40；基宽 360+148 下 stretch 生效，总宽不超树宽 1173，layer 右缘贴边不溢出）。
 - **列表控件 = TreeList（v5，根治"文字堆叠/无法辨认"）**：本构建 vista 主题下 `ttk.Treeview` 行距**硬编码 ~20px**（168dpi 实测），而 9pt 中字行距 28px → 行距 < 字行距，相邻行文字粘连 8px。关键坑：**`ttk.Style().configure("Treeview", font/padding=…)` 在此构建全部静默失效**（lookup 恒 `''`，行距不变）——v4 的 padding"+27% 行高"实为 0 效果（主人 4 次反馈"没改过"的根因）。解法：`src\treelist.py`（Canvas 自绘、Treeview API 兼容的列表），行高 = 字行距×1.35（168dpi 实测 37px vs 字 28px → 留白 10px）；**仅 Windows 启用**（`gui.py` 构造行 `TreeList if IS_WIN else ttk.Treeview`，Mac 行距正常保持真 Treeview）。PyInstaller spec datas 需显式加 `('treelist.py','.')`（`_internal\` 下，bootstrap 双 sys.path 命中）。
 - **防残影重绘**：窗口 `<Configure>` 防抖 300ms 全量重绘树（PMDv2 缩放/移屏旧文字残影，delete+原 iid 重插，选中态保留）。
+- **v6 按钮同色（主人令）**：run 钮 idle/加载态底色 `#e9eaef`→`#d5d7dd`——初始页四钮（运行/停止/⚡生成指令/复制）统一浅灰 `#d5d7dd`+`#999` 字；状态色不变（就绪绿 `#2e7d32` / 运行中红 `#c62828` / 可用深灰 `#4a5568` / 按下反馈 `#c9cbd4`）。
 - 窗口 `_fit_frame` 内容自适应；回退 1560×954；图片页切页恢复文字页尺寸。
 - 诊断方法沉淀：**"文字重叠"先量 bbox 行距 vs 字体行距**（`tree.bbox(iid,col)` 相邻行 y 差 vs `tkfont.Font(root,(fam,sz)).metrics("linespace")`），再像素验证（ImageGrab + 暗像素行带投影）；style 失效时以 lookup 回值为准，不以"我设过"为准。
 
@@ -77,6 +78,7 @@ venv pyinstaller --noconfirm llama-shell.spec
 - 35B-A3B MoE（vanilla Vulkan）：本机天花板 ~15 t/s（CPU MoE 侧定）。
 - E4B（ik CPU AVX2）：≈12.3 t/s。
 - E4B（vanilla Vulkan b12374）：prefill ≈1005 t/s、decode ≈51 t/s（快于 ik 与 TQ3-HIP 包）。
+- **Inkling-2-Mini（16.5GB Q4_K，推理模型，11-23 A/B 实证）**：chat 路径先写思考块（`reasoning_content`，本次 ~50 token）再写答案；`--reasoning off` 只关 effort、不关模板自带思考。**max_tokens=48 < 思考块 → `content` 空串但 completion_tokens 已消耗**（= 主人"加载成功、输出失败"症状；b12374/b12650 同病，非版本缺陷）；≥256 正常出 `content`（实测 104/98 token 收尾 stop）。诊断此类问题看 `/v1/chat/completions` 全量 JSON 的 `reasoning_content` 字段，raw `/completion` 不走 jinja 模板、不能复现。预填速度调参 A/B（ctx/KV 量化/线程）结果见 11-23 对话。
 
 ## 8. 仓库与文件
 

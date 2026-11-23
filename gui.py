@@ -1181,7 +1181,7 @@ class App:
             "● 就绪 · 运行中" if (running and ready) else (
                 "● 正在加载" if running else
                 ("● 就绪 · 点击启动" if ready else "▶ 运行（加载后启动）")),
-            "#2e7d32" if ready else "#e9eaef",
+            "#2e7d32" if ready else "#d5d7dd",
             "white" if ready else "#999", key="run"
         )
         self._draw_stop = lambda running, ready: draw_btn(
