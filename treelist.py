@@ -53,16 +53,19 @@ class TreeList:
         return max(int(self._font.metrics("linespace") * 1.35), 16)
 
     def _col_widths(self, canvas_w):
-        """stretch 列吃满剩余宽度（对齐 Treeview 语义）"""
+        """stretch 列吃满剩余宽度（对齐 Treeview 语义；x 起点=2，余量按 canvas_w-2 分配防右缘溢出）"""
         widths = dict(self._colw)
         total = sum(widths.values())
-        if total < canvas_w and any(self._stretch.values()):
-            deficit = canvas_w - total
+        avail = canvas_w - 2
+        if total < avail and any(self._stretch.values()):
+            deficit = avail - total
             stretch_cols = [c for c in self.cols if self._stretch[c]]
             if stretch_cols:
-                each = deficit // len(stretch_cols)
+                n = len(stretch_cols)
+                each = deficit // n
+                rem = deficit % n
                 for i, c in enumerate(stretch_cols):
-                    widths[c] += each + (deficit % len(stretch_cols) == i)
+                    widths[c] += each + (1 if i < rem else 0)   # 余数分给前 rem 个，余数 0 不多加
         return widths
 
     def _x_offsets(self, canvas_w):
