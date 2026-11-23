@@ -277,6 +277,13 @@ check("图片页控件齐", all(hasattr(app, a) for a in
 check("升级按钮在engbar且无独立升级行", hasattr(app, "upg_btn")
       and app.upg_btn.master is app.engbar and not hasattr(app, "upgbar")
       and not hasattr(app, "up_ver_lbl"))
+if sys.platform == "win32":
+    # 11-23 主人定规：Windows 升级落盘 = D:\llama-vulkan-x64-bNNNN 版本化目录，保留最近 2 个滚动删
+    vb = gui.win_vulkan_builds()
+    check("Windows 版本化目录枚举", callable(getattr(gui, "win_vulkan_builds", None))
+          and isinstance(vb, list) and all(isinstance(t, tuple) and len(t) == 2 for t in vb),
+          [t[0] for t in vb][:3])
+    check("Windows 轮次删除函数在位", callable(getattr(gui, "rotate_win_vulkan_builds", None)))
 
 ROOT.destroy()
 print()

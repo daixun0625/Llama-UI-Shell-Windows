@@ -45,10 +45,11 @@ else:
     MODELS_DIR_DEFAULT = "/Volumes/CT/models"
     TOSH_BIN_DEFAULT = "/Applications/ToshLLM.app/Contents/Resources/bin/llama-server"
     IK_BIN_DEFAULT = "/Volumes/CT/ik/bin/llama-server"   # 第三引擎 ik_llama.cpp（纯 CPU AVX2）
-# 系统默认 vanilla llama-server 探测链：
+# 系统默认 vanilla llama-server 探测链（11-23 起 ② 优先 D:\llama-vulkan-x64-bNNNN 最高版本目录）：
 # ① 系统 PATH（which llama-server，conda/brew/源码安装都受益）
-# ② Windows：主人现役生产 Vulkan 构建 D:\llama-vulkan-x64（配置为空时优先它）
-# ③ 本地兜底 bin/llama-b*/llama-server 中编号最高者（升级 llama 只需在 bin/ 放新目录）
+# ② Windows：主人现役生产 Vulkan 构建——版本化目录 D:\llama-vulkan-x64-bNNNN 中编号最高者
+#    （无编号后缀的 D:\llama-vulkan-x64 仅在无版本化目录时兜底）
+# ③ 本地兜底 bin/llama-b*/llama-server 中编号最高者
 VANILLA_BIN_FALLBACK = recommend.latest_vanilla_bin()
 def _find_default_llama_server() -> str:
     import shutil
@@ -56,6 +57,19 @@ def _find_default_llama_server() -> str:
     if p:
         return p
     if IS_WIN:
+        # 最高编号版本化目录 D:\llama-vulkan-x64-bNNNN（内联扫描：本函数模块级立即执行，
+        # 不能前向引用后面定义的 win_vulkan_builds；版本化目录是 D:\ 顶层兄弟目录）
+        ddrive = "D:\\"
+        best = None
+        if os.path.isdir(ddrive):
+            for d in os.listdir(ddrive):
+                m = re.match(r"^llama-vulkan-x64-b(\d+)$", d)
+                if m and os.path.isfile(os.path.join(ddrive, d, "llama-server.exe")):
+                    n = int(m.group(1))
+                    if best is None or n > best[0]:
+                        best = (n, os.path.join(ddrive, d, "llama-server.exe"))
+        if best:
+            return best[1]
         prod = r"D:\llama-vulkan-x64\llama-server.exe"
         if os.path.exists(prod):
             return prod
@@ -335,6 +349,38 @@ def platform_asset(release: dict, os_name: str, arch: str):
 
 
 _LLAMA_SRV = "llama-server.exe" if os.name == "nt" else "llama-server"   # 平台引擎文件名
+
+# 11-23 主人定规：Windows 升级包版本化目录根（D:\llama-vulkan-x64-bNNNN\llama-server.exe）；
+# 「检查并升级」下载/解包到新版目录（不再用 BASE/bin/.dl），保留最近 2 个版本目录、滚动删除。
+WIN_VULKAN_ROOT = r"D:\llama-vulkan-x64"
+
+
+def win_vulkan_builds() -> list:
+    """Windows 版本化目录清单（D:\\llama-vulkan-x64-bNNNN\\llama-server.exe 存在的才计），
+    (build_num, 目录) 降序。注意版本化目录是 D:\\ 顶层兄弟目录，不在 D:\\llama-vulkan-x64 之内。"""
+    out = []
+    ddrive = os.path.dirname(WIN_VULKAN_ROOT)   # D:\
+    if os.path.isdir(ddrive):
+        for d in os.listdir(ddrive):
+            m = re.match(r"^llama-vulkan-x64-b(\d+)$", d)
+            if m and os.path.isfile(os.path.join(ddrive, d, _LLAMA_SRV)):
+                out.append((int(m.group(1)), os.path.join(ddrive, d)))
+    return sorted(out, reverse=True)
+
+
+def rotate_win_vulkan_builds(keep_num: int, running_bin: str = None) -> list:
+    """Windows 版本化目录轮次删除（11-23 主人定规）：保留 新版 + 最近 1 个旧版（共 2 个），
+    其余 D:\\llama-vulkan-x64-bNNNN 删掉；正在运行引擎所在目录不删。返回实际删除目录列表。
+    注意：无 b 编号后缀的旧生产目录 D:\\llama-vulkan-x64 不在轮次范围（主人令才动）。"""
+    import shutil as _sh
+    dropped = []
+    olds = [p for n, p in win_vulkan_builds() if n != keep_num]   # 降序
+    for p in olds[1:]:                                            # 保留最近 1 个旧版，其余删
+        if running_bin and os.path.abspath(running_bin).startswith(p + os.sep):
+            continue
+        _sh.rmtree(p, ignore_errors=True)
+        dropped.append(p)
+    return dropped
 
 
 def local_llama_builds(bindir: str = None) -> list:
@@ -2377,15 +2423,22 @@ class App:
         threading.Thread(target=self._upgrade_download_worker, args=(num, url), daemon=True).start()
 
     def _upgrade_download_worker(self, num: int, url: str):
-        """线程：下载 → 解包 bin/llama-bNNNN/ → 校验 --version → 轮次删旧版 → __UPG_DONE__。
+        """线程：下载 → 解包 → 校验 --version → 轮次删旧版 → __UPG_DONE__。
+        落盘路径（11-23 主人定规）：Windows = D:\\llama-vulkan-x64-bNNNN（版本化目录，
+        保留最近 2 个滚动删；不再用 BASE/bin/.dl）；macOS 保持 bin/llama-bNNNN。
         全程不碰 widget；配置写回/engbar 刷新留给主线程 __UPG_DONE__ 处理。"""
         import tarfile, zipfile, shutil as _sh
         os_name, _arch = _plat_arch()
-        fpath = url.rsplit("/", 1)[-1]
-        tmpdir = os.path.join(BASE, "bin", ".dl")
+        fname = url.rsplit("/", 1)[-1]
+        if os.name == "nt":
+            vdir = f"{WIN_VULKAN_ROOT}-b{num}"           # D:\llama-vulkan-x64-bNNNN
+            tmpdir = os.path.join(vdir, ".dl")
+        else:
+            vdir = None
+            tmpdir = os.path.join(BASE, "bin", ".dl")
         os.makedirs(tmpdir, exist_ok=True)
-        fpath = os.path.join(tmpdir, fpath)
-        self.q.put(f"[升级] 下载 {fpath} …")
+        fpath = os.path.join(tmpdir, fname)
+        self.q.put(f"[升级] 下载 {fname} → {vdir or os.path.join(BASE, 'bin')} …")
         try:
             def prog(pct, got, total):
                 self.q.put(f"[升级] 下载 {pct}%（{got / 1048576:.1f}/{total / 1048576:.1f} MB）")
@@ -2397,9 +2450,10 @@ class App:
                 pass
             self.q.put(f"__UPG_FAIL__:下载失败: {e}")
             return
-        # 解包到 bin/：filter="data" 阻断路径穿越且保留 dylib 相对 symlink（16 个，11-19 实测）；
-        # py<3.12 无 filter 参数 → TypeError 回退裸解包
-        dest = os.path.join(BASE, "bin")
+        # 解包：Windows 直落版本化目录（zip 顶层若带 llama-bNNNN/ 则拍平，保证
+        # D:\llama-vulkan-x64-bNNNN\llama-server.exe 直接可用）；macOS 解到 bin/
+        # （filter="data" 阻断路径穿越且保留 dylib 相对 symlink；py<3.12 无 filter → 回退裸解包）
+        dest = vdir if os.name == "nt" else os.path.join(BASE, "bin")
         try:
             if fpath.endswith(".zip"):
                 with zipfile.ZipFile(fpath) as z:
@@ -2410,10 +2464,17 @@ class App:
                         t.extractall(dest, filter="data")
                     except TypeError:
                         t.extractall(dest)
+            if os.name == "nt":
+                nested = os.path.join(dest, f"llama-b{num}")
+                if os.path.isdir(nested):
+                    for fn in os.listdir(nested):
+                        os.replace(os.path.join(nested, fn), os.path.join(dest, fn))
+                    os.rmdir(nested)
         except Exception as e:
             self.q.put(f"__UPG_FAIL__:解包失败: {e}")
             return
-        srv = os.path.join(dest, f"llama-b{num}", _LLAMA_SRV)
+        srv = os.path.join(dest, _LLAMA_SRV) if os.name == "nt" \
+            else os.path.join(dest, f"llama-b{num}", _LLAMA_SRV)
         if not os.path.isfile(srv):
             self.q.put(f"__UPG_FAIL__:解包结果缺 {srv}（旧版未动，可重试）")
             return
@@ -2433,9 +2494,13 @@ class App:
         except Exception as e:
             self.q.put(f"__UPG_FAIL__:新版运行校验失败: {e}（旧版未动）")
             return
-        # 轮次删除旧版：保留 新 + 最近 1 旧；正在运行的引擎所在目录不删
+        # 轮次删除旧版（11-23 主人定规）：Windows = D:\llama-vulkan-x64-bNNNN 保留最近 2 个；
+        # macOS = bin/llama-bNNNN 保留 新 + 最近 1 旧；正在运行的引擎所在目录不删
         running_bin = self._running_bin if (self.proc is not None and self.proc.poll() is None) else None
-        dropped = rotate_old_builds(num, running_bin=running_bin)
+        if os.name == "nt":
+            dropped = rotate_win_vulkan_builds(num, running_bin=running_bin)
+        else:
+            dropped = rotate_old_builds(num, running_bin=running_bin)
         for p in dropped:
             self.q.put(f"[升级] 轮次删除旧版: {p}")
         try:
