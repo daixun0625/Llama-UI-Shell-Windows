@@ -1791,15 +1791,21 @@ class App:
     def _img_reader(self):
         import re as _re
         p = self.proc
-        step_re = re.compile(r'(\d+)\s*/\s*(\d+)\s*-\s*[\d.]+\s*it/s')
+        # sd-cli（LocModel）实际进度行："|...条形...| CUR/TOT - X.XX(GB/s|s/it|it/s)"
+        # GB/s = 张量加载相位；s/it 或 it/s = 采样步数相位（11-23 主人报"进度条不反映实际进度"根因：
+        # 旧正则只匹配 it/s，采样主循环多为 s/it 形式 → 事件几乎不发，进度条卡住）
+        sd_re = re.compile(r'\|\s*(\d+)\s*/\s*(\d+)\s*-\s*[\d.]+\s*(GB/s|s/it|it/s)')
         step_re2 = re.compile(r'\bstep\s*(\d+)\s*/\s*(\d+)', re.I)   # stable-diffusion.cpp "Step X/Y" 变体
         for line in iter(p.stdout.readline, ""):
             self.q.put("OUT:" + line)
-            ms = step_re.search(line)          # 出图步数 → 专用进度事件（不依赖共用日志分支）
-            if not ms:
-                ms = step_re2.search(line)
+            ms = sd_re.search(line)
             if ms:
-                self.q.put(f"__IMG_PROGRESS__:{ms.group(1)}:{ms.group(2)}")
+                phase = "L:" if ms.group(3) == "GB/s" else ""
+                self.q.put(f"__IMG_PROGRESS__:{phase}{ms.group(1)}:{ms.group(2)}")
+                continue
+            m2 = step_re2.search(line)
+            if m2:
+                self.q.put(f"__IMG_PROGRESS__:{m2.group(1)}:{m2.group(2)}")
         rc = p.wait()
         newest = self._find_newest(getattr(self, "_out_dir", self.img_out_dir))
         self.q.put(f"__IMG_DONE__:{rc}:{newest or ''}")
@@ -3543,15 +3549,21 @@ class App:
                     self._log(f"已载入 {len(self.st_cache)} 个模型")
                 elif item.startswith("OUT:"):
                     self._log(item[4:])
-                    # 出图步数进度：sd-cli 步进行 "... | CUR/TOT - Xit/s" → 预览区进度条 X/N 步
+                    # 出图步数进度（兜底：专用 __IMG_PROGRESS__ 事件未命中时）：sd-cli 采样行
+                    # "... | CUR/TOT - X.XX(s/it|it/s)" → 预览区进度条 X/N 步（GB/s=加载相位，不驱动步数）
                     import re as _re
-                    ms = _re.search(r'(\d+)\s*/\s*(\d+)\s*-\s*[\d.]+\s*it/s', item)
+                    ms = _re.search(r'(\d+)\s*/\s*(\d+)\s*-\s*[\d.]+\s*(?:s/it|it/s)', item)
                     if ms and hasattr(self, "img_prog") and self.page == "image":
                         self._update_img_progress(int(ms.group(1)), int(ms.group(2)))
                 elif item.startswith("__IMG_PROGRESS__:"):
                     _pr = item[len("__IMG_PROGRESS__:"):].split(":")
-                    if len(_pr) == 2 and hasattr(self, "img_prog"):
-                        self._update_img_progress(int(_pr[0]), int(_pr[1]))
+                    if hasattr(self, "img_prog"):
+                        if len(_pr) == 3 and _pr[0] == "L":
+                            # 张量加载相位（GB/s）：进度条按 张量数/总数 走，标签注明
+                            self._update_img_progress(int(_pr[1]), int(_pr[2]),
+                                                      note=f"加载模型 {_pr[1]}/{_pr[2]}")
+                        elif len(_pr) == 2:
+                            self._update_img_progress(int(_pr[0]), int(_pr[1]))
                 elif item.startswith("HEALTH:"):
                     ok = item[7:] == "1"
                     # 状态机：HEALTH 健康 = 系统 ready（运行钮可点亮的门）
