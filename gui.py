@@ -318,7 +318,7 @@ def _plat_arch() -> tuple:
     return None, None
 
 
-def _gh_get(url: str, timeout: int = 30, raw: bool = False):
+def _gh_get(url: str, timeout: int = 60, raw: bool = False):
     """GitHub API / 下载资源读取（urllib 零依赖；必须带 UA，否则 API 403）。"""
     req = urllib.request.Request(
         url, headers={"User-Agent": "llama-shell/upgrade",
@@ -330,21 +330,27 @@ def _gh_get(url: str, timeout: int = 30, raw: bool = False):
 
 def platform_asset(release: dict, os_name: str, arch: str):
     """在单个 release（含 assets 列表）里找本平台预编译件。
-    返回 (build_num, download_url)；没有匹配资产返回 None。"""
+    11-27 修复：win32 优先 **win-vulkan** 资产（主人规矩：vanilla 行 = Vulkan 构建
+    D:\\llama-vulkan-x64-bNNNN）；无 vulkan 包才回落 win-cpu（老 release 无 vulkan
+    资产）。旧代码一律取 win-cpu → GUI 升级把引擎静默降级成 CPU（"能跑但慢"，不报错）。
+    返回 {"num","url","asset","variant"}；没有匹配资产返回 None。"""
     tag = str(release.get("tag_name", ""))
     m = re.search(r"b(\d+)", tag)
     if not m:
         return None
     b = m.group(1)
     if os_name == "darwin":
-        want = f"llama-b{b}-bin-macos-{arch}.tar.gz"
+        want = [f"llama-b{b}-bin-macos-{arch}.tar.gz"]
     elif os_name == "win32":
-        want = f"llama-b{b}-bin-win-cpu-{arch}.zip"
+        want = [f"llama-b{b}-bin-win-vulkan-{arch}.zip",
+                f"llama-b{b}-bin-win-cpu-{arch}.zip"]   # 回落：老 release 无 vulkan 包
     else:
         return None
-    for a in release.get("assets", []):
-        if a.get("name") == want:
-            return int(b), a["browser_download_url"]
+    have = {a.get("name"): a for a in release.get("assets", [])}
+    for w in want:
+        if w in have:
+            return {"num": int(b), "url": have[w]["browser_download_url"], "asset": w,
+                    "variant": w.split("bin-")[-1].replace(".zip", "").replace(".tar.gz", "")}
     return None
 
 
@@ -412,15 +418,24 @@ def current_vanilla_num(cfg: dict = None) -> tuple:
     return None, ""
 
 
-def upgrade_check() -> dict:
+def upgrade_check(progress=None) -> dict:
     """联网查 GitHub：最近有本平台预编译件的 release（=最新）+ 稳定指针 + 本地现值。
     稳定指针两级：① releases/latest 自身带本平台二进制（semver 发布直出二进制的形态）；
     ② 其 nightly-tag.txt 指向的稳定构建号（v1.0.0 时代形态，11-19 实测 b12359）。
-    返回 {cur_num, cur_src, latest_num, latest_url, stable_num, stable_url}；查不到抛 RuntimeError。"""
+    progress(msg)：可选进度行回调（11-27：本机 GitHub API 单 list ~35s，无进度行=体感卡死；
+    检查 worker 传 self.q.put → 落 GUI 日志）。
+    返回 {cur_num, cur_src, latest_num, latest_url, latest_variant,
+          stable_num, stable_url, stable_variant}；查不到抛 RuntimeError。"""
+    def _say(msg):
+        if progress:
+            progress(msg)
     os_name, arch = _plat_arch()
     if os_name is None:
         raise RuntimeError(f"平台 {sys.platform} 无预编译件选择逻辑（仅支持 macOS/Windows）")
+    _say("正在查询 GitHub release 列表…（本机 API 慢时约 30–60s）")
+    t0 = time.time()
     rels = _gh_get(f"{GH_API}/releases?per_page=50")
+    _say(f"release 列表已取（{time.time() - t0:.0f}s，{len(rels)} 条），定位最新版本…")
     latest = None
     for r in rels:
         pa = platform_asset(r, os_name, arch)
@@ -429,14 +444,15 @@ def upgrade_check() -> dict:
             break
     if not latest:
         raise RuntimeError("GitHub 最近 50 个 release 均无本平台预编译件，无法自动升级")
-    latest_num, latest_url = latest
+    latest_num, latest_url = latest["num"], latest["url"]
     # 稳定指针（可选，失败不影响「最新」升级）
-    stable_num, stable_url = None, None
+    stable_num, stable_url, stable_variant = None, None, None
     try:
+        _say("正在查稳定指针（nightly-tag）…")
         lat = _gh_get(f"{GH_API}/releases/latest")
         pa = platform_asset(lat, os_name, arch)
         if pa:
-            stable_num, stable_url = pa
+            stable_num, stable_url, stable_variant = pa["num"], pa["url"], pa["variant"]
         else:
             for a in lat.get("assets", []):
                 if a.get("name") == "nightly-tag.txt":
@@ -448,20 +464,23 @@ def upgrade_check() -> dict:
                             if r.get("tag_name") and m.group(0) in r["tag_name"]:
                                 pa2 = platform_asset(r, os_name, arch)
                                 if pa2:
-                                    stable_url = pa2[1]
+                                    stable_url, stable_variant = pa2["url"], pa2["variant"]
                                 break
                         if not stable_url:
                             # 稳定构建比 50 个夜标签更旧（超出列表窗口）→ 按 tag 定向查
                             st_rel = _gh_get(f"{GH_API}/releases/tags/{m.group(0)}")
                             pa2 = platform_asset(st_rel, os_name, arch)
                             if pa2:
-                                stable_url = pa2[1]
+                                stable_url, stable_variant = pa2["url"], pa2["variant"]
     except Exception:
         pass
     cur_num, cur_src = current_vanilla_num()
+    _say("版本核对完成。")
     return {"cur_num": cur_num, "cur_src": cur_src,
             "latest_num": latest_num, "latest_url": latest_url,
-            "stable_num": stable_num, "stable_url": stable_url}
+            "latest_variant": latest["variant"],
+            "stable_num": stable_num, "stable_url": stable_url,
+            "stable_variant": stable_variant}
 
 
 def _http_download(url: str, dest: str, progress=None) -> str:
@@ -2408,7 +2427,7 @@ class App:
         本线程不碰任何 widget，只经 self.q（pump 处理）。"""
         try:
             self.q.put("[升级] 正在查询 GitHub llama.cpp 最新版本…")
-            info = upgrade_check()
+            info = upgrade_check(progress=self.q.put)
         except Exception as e:
             self.q.put("__UPG_FAIL__:" + str(e))
             return
@@ -2425,12 +2444,13 @@ class App:
         self.q.put("__UPG_ASK__:" + json.dumps(info, ensure_ascii=False))
 
     def _upg_label(self, info: dict):
-        """版本信息（11-23 升级行取消后）：写入日志 [升级] 行，不再写行内标签。"""
+        """版本信息（11-23 升级行取消后）：写入日志 [升级] 行，不再写行内标签。
+        11-27：稳定/最新带资产 variant（win-vulkan-x64 / win-cpu-x64，装的是 GPU 还是 CPU 引擎一目了然）。"""
         seg = []
         seg.append(f"本地 b{info['cur_num']}" if info.get("cur_num") else "本地未知")
         if info.get("stable_num"):
-            seg.append(f"稳定 b{info['stable_num']}")
-        seg.append(f"最新 b{info['latest_num']}")
+            seg.append(f"稳定 b{info['stable_num']}" + (f"（{info['stable_variant']}）" if info.get("stable_variant") else ""))
+        seg.append(f"最新 b{info['latest_num']}" + (f"（{info['latest_variant']}）" if info.get("latest_variant") else ""))
         self._log("[升级] " + " · ".join(seg))
 
     def _ask_upgrade(self, info: dict):
@@ -2450,10 +2470,10 @@ class App:
             win.destroy()
             self._start_download(num, url)
         if info.get("latest_url"):
-            ttk.Button(win, text=f"下载并安装 最新 b{lat}（推荐）",
+            ttk.Button(win, text=f"下载并安装 最新 b{lat}（{info.get('latest_variant') or '默认'}，推荐）",
                        command=lambda: pick(lat, info["latest_url"])).pack(fill="x", padx=12, pady=2)
         if st and st != lat and st > (cur or 0) and info.get("stable_url"):
-            ttk.Button(win, text=f"安装 稳定 b{st}",
+            ttk.Button(win, text=f"安装 稳定 b{st}（{info.get('stable_variant') or '默认'}）",
                        command=lambda: pick(st, info["stable_url"])).pack(fill="x", padx=12, pady=2)
         def cancel():
             win.destroy()

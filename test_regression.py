@@ -45,6 +45,36 @@ ROOT.withdraw()
 gui.messagebox = mbox
 for k in ("showinfo", "showwarning", "showerror"):
     setattr(mbox, k, lambda *a, **kw: None)
+
+# 11-27 hermetic：回归门不得依赖 D 盘 b 版本目录是否还在（b12651 被删后
+# 基线配置指向不存在的二进制 → cmd 框为空 → #8 IndexError 整门崩掉）。
+# 基线配置的引擎二进制有缺失时，注入临时配置：vanilla 指现存最高 b 目录（无则
+# 兜底 ik 二进制），ik 指 D:\ik-win\bin。全齐则不注入（保持原行为）。
+_base_cfg = gui._load_config()
+_v, _ik = _base_cfg.get("vanilla_bin") or "", _base_cfg.get("ik_bin") or ""
+_vok, _ikok = bool(_v) and os.path.isfile(_v), bool(_ik) and os.path.isfile(_ik)
+if not (_vok and _ikok):
+    repl_v, repl_ik = _v, _ik
+    if not _vok:
+        for _n, _d in gui.win_vulkan_builds():
+            _c = os.path.join(_d, gui._LLAMA_SRV)
+            if os.path.isfile(_c):
+                repl_v = _c
+                break
+        if not (repl_v and os.path.isfile(repl_v)):
+            repl_v = r"D:\ik-win\bin\llama-server.exe"   # 兜底：门只要求可解析二进制
+    if not _ikok:
+        repl_ik = r"D:\ik-win\bin\llama-server.exe"
+    if not (os.path.isfile(repl_v) and os.path.isfile(repl_ik)):
+        raise SystemExit(f"regression: 找不到可用引擎二进制 (vanilla={repl_v} ik={repl_ik})")
+    _cfg_tmp = os.path.join(tempfile.gettempdir(), "llama-shell-regtest-config.json")
+    _cfg_data = dict(_base_cfg)
+    _cfg_data["vanilla_bin"] = repl_v
+    _cfg_data["ik_bin"] = repl_ik
+    json.dump(_cfg_data, open(_cfg_tmp, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+    gui.CONFIG_FILE = _cfg_tmp
+    print(f"[hermetic] 注入临时配置: vanilla={repl_v} | ik={repl_ik}")
+
 app = gui.App(ROOT)
 ROOT.update(); time.sleep(0.3)
 
@@ -150,15 +180,17 @@ app.clear_mode_var.set("clear")
 app.ovr.config(state="normal"); app.ovr.delete("1.0", "end")
 app.ovr.insert("1.0", "-c 8192 -fa on")
 app._refresh_recommend(); ROOT.update()
-cmd_line = app.cmd.get("1.0", "end").strip().splitlines()[0]
-ok_clear = ("--host" in cmd_line and "-c 8192" in cmd_line and "-fa on" in cmd_line
+cmd_line = (app.cmd.get("1.0", "end").strip().splitlines() or [""])[0]
+ok_clear = bool(cmd_line) and ("--host" in cmd_line and "-c 8192" in cmd_line and "-fa on" in cmd_line
             and "-ngl" not in cmd_line and "--ctx-size" not in cmd_line)
-check("清空模式(仅 框架+输入，无自动参数)", ok_clear, cmd_line[:120])
+check("清空模式(仅 框架+输入，无自动参数)", ok_clear,
+      "cmd 框为空（引擎二进制缺失?）" if not cmd_line else cmd_line[:120])
 app.clear_mode_var.set("override")
 app.ovr.delete("1.0", "end")
 app._refresh_recommend(); ROOT.update()
-cmd_line2 = app.cmd.get("1.0", "end").strip().splitlines()[0]
-check("切回覆盖模式(自动参数恢复)", ("-ngl" in cmd_line2 or "-m " in cmd_line2), cmd_line2[:80])
+cmd_line2 = (app.cmd.get("1.0", "end").strip().splitlines() or [""])[0]
+check("切回覆盖模式(自动参数恢复)", bool(cmd_line2) and ("-ngl" in cmd_line2 or "-m " in cmd_line2),
+      "cmd 框为空" if not cmd_line2 else cmd_line2[:80])
 
 # 9) ovr 旧覆盖不再静默注入 + 不持久化 override 键
 key = app.tree.item(kids[0], "values")[-1]
@@ -284,6 +316,32 @@ if sys.platform == "win32":
           and isinstance(vb, list) and all(isinstance(t, tuple) and len(t) == 2 for t in vb),
           [t[0] for t in vb][:3])
     check("Windows 轮次删除函数在位", callable(getattr(gui, "rotate_win_vulkan_builds", None)))
+
+    # 17) 11-27 升级流：platform_asset win32 优先 win-vulkan（修 CPU 静默降级）
+    #     + upgrade_check 进度行 / 最新资产走 vulkan（hermetic：monkeypatch _gh_get，不碰真网络）
+    _rel_both = {"tag_name": "b12809", "assets": [
+        {"name": "llama-b12809-bin-win-cpu-x64.zip", "browser_download_url": "https://x/cpu.zip"},
+        {"name": "llama-b12809-bin-win-vulkan-x64.zip", "browser_download_url": "https://x/vulkan.zip"}]}
+    _pa = gui.platform_asset(_rel_both, "win32", "x64")
+    _pc = gui.platform_asset({"tag_name": "b12000", "assets": [
+        {"name": "llama-b12000-bin-win-cpu-x64.zip", "browser_download_url": "https://x/cpu.zip"}]}, "win32", "x64")
+    check("platform_asset win32 优先 win-vulkan（缺 vulkan 才回落 cpu）",
+          bool(_pa) and _pa["asset"].endswith("win-vulkan-x64.zip") and _pa["url"] == "https://x/vulkan.zip"
+          and bool(_pc) and _pc["asset"].endswith("win-cpu-x64.zip") and _pc["variant"] == "win-cpu-x64",
+          f"both={_pa} | cpu-only={_pc}")
+    _prog = []
+    _real_gh = gui._gh_get
+    gui._gh_get = lambda url, timeout=60, raw=False: (
+        [_rel_both] if "/releases?per_page" in url else {"tag_name": "b12809", "assets": []})
+    try:
+        _info = gui.upgrade_check(progress=_prog.append)
+    finally:
+        gui._gh_get = _real_gh
+    check("upgrade_check 进度行 + 最新资产走 win-vulkan（hermetic）",
+          any("release 列表" in m for m in _prog) and _info["latest_num"] == 12809
+          and _info.get("latest_url") == "https://x/vulkan.zip"
+          and _info.get("latest_variant") == "win-vulkan-x64",
+          f"progress={_prog} latest={_info['latest_num']} url={_info.get('latest_url')}")
 
 ROOT.destroy()
 print()

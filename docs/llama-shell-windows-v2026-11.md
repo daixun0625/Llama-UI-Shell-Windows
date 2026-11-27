@@ -122,3 +122,12 @@ venv pyinstaller --noconfirm llama-shell.spec
  5. `vae decode: segment 1/25 weight preparation failed`（32B 编码器 18G + 扩散 11.4G 压满资源后，Vulkan VAE 解码分配失败；VAE 文件本身完整）→ A/B 实证 `--backend vae=cpu` 出图（rc=0，generate 183.6s）；`build_image_command` 对 `edit_capable` 模型加 `--backend vae=cpu`（z-image 族不受影响，Vulkan VAE 照旧）。
 ③ **验证**：h3 条目扫描 = 32B 编码器 + h3 VAE ✓；**全链路出图 PASS**（GUI 形态命令 rc=0，generate 183.6s，PNG 853KB；首张 `h3_repro/vae_cpu_test.png`）；回归 42/42。
 出货 @`6a27493`（含 vae=cpu 收尾）；dist 已重建 + 反斜杠 config 注入。**h3 已可用**：选 h3 直接生成（慢：采样 ~7s/步 ×20 + VAE 解码，总 ~4–6 分钟/张）。
+
+## 12. 升级流 B 修复 + 门禁确定性（11-27）
+
+主人指令：「开工A，并验证gui可靠性」→「B」（根因修复）。
+① **platform_asset 静默降级（根因）**：旧代码 win32 只认 `llama-bNNNN-bin-win-cpu-x64.zip` → 每次 GUI「检查并升级」都把 **CPU 构建**装进 `D:\llama-vulkan-x64-bNNNN` 目录（b12728、b12809 先后中招；症状="能跑但慢"，不报错；11-27 b12809 由助手手动换回官方 win-vulkan 包）。修复：win32 **优先 win-vulkan 资产**，vulkan 缺失才回落 win-cpu（老 release）；返回 variant（`win-vulkan-x64`/`win-cpu-x64`），[升级] 日志行与版本选择对话框按钮均展示。
+② **升级"卡死"体感**：本机 GitHub API 单 list ~35s、串行 3–5 次、零进度行。修复：`upgrade_check(progress=…)` 每步进度行（查询列表 → 已取 Ns → 稳定指针 → 版本核对完成）；`_gh_get` 超时 30→60s。
+③ **门禁确定性（11-27 发现）**：b 目录被删后 src 配置悬空指 b12651 → #8 cmd 框空 → `splitlines()[0]` IndexError 崩掉整门（后续 26 项未跑）；`_e2e_text` 钉死 Q4_K_P，而 11-21 库里已换 Q6 → E2E 挂。修复：`test_regression.py` 头部 **hermetic 配置注入**（二进制缺失时注入临时配置→现存 b 目录/ik 兜底）+ #8 空 cmd 守卫（报 FAIL 不崩）+ e2e 按模型名前缀选、不钉量化档。
+④ **新增 #17 回归 2 条**（hermetic：monkeypatch `_gh_get`，不碰真网络）：platform_asset 优先 vulkan / cpu 回落 + variant；upgrade_check 进度行 + 最新资产走 vulkan。门禁 = 回归 44 项全 PASS + E2E-A PASS。
+⑤ **实测**：b12809 官方 win-vulkan（E4B-Q6、4k ctx、16.5 t/s，日志 `layer 0 … assigned to device Vulkan0`）；新构建烟测 ALIVE 45s + dist 6 键配置完整。此后 GUI 升级流装的都是 win-vulkan，variant 在日志/对话框可见；只有老 release 无 vulkan 资产才回落 cpu 且日志明示。
