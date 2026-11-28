@@ -112,26 +112,78 @@ def _str(buf, off):
     if off + 8 + ln > n: return "", off + 8 + ln, False
     return bytes(buf[off + 8:off + 8 + ln]).decode('utf-8', 'replace'), off + 8 + ln, True
 
+# GGUF v3（11-28 起，如 Bonsai-2.5-27B PQ2_0）：header 计数与 string 长度均为 u32，
+# tensor entry 尾段 data_offset 也是 u32；值类型码同 new 规格但 string 长度 u32。
+def _str3(buf, off):
+    """v3 string: u32 len + bytes → (text, new_off, ok)"""
+    n = len(buf)
+    if off + 4 > n: return "", off + 4, False
+    ln = struct.unpack_from('<I', buf, off)[0]
+    if ln > 100_000_000: return "", off + 4, False
+    if off + 4 + ln > n: return "", off + 4 + ln, False
+    return bytes(buf[off + 4:off + 4 + ln]).decode('utf-8', 'replace'), off + 4 + ln, True
+
+def _adv_v3(buf, voff, t):
+    """v3 值推进（同 new 规格宽度；t=8 string 用 u32 长度）"""
+    n = len(buf)
+    if t in (0, 1, 7): return voff + 1 if voff + 1 <= n else -1
+    if t in (2, 3): return voff + 2 if voff + 2 <= n else -1
+    if t in (4, 5, 6): return voff + 4 if voff + 4 <= n else -1
+    if t in (10, 11, 12): return voff + 8 if voff + 8 <= n else -1
+    if t == 8:
+        if voff + 4 > n: return -1
+        ln = struct.unpack_from('<I', buf, voff)[0]
+        if ln > 100_000_000: return -1
+        return voff + 4 + ln if voff + 4 + ln <= n else -1
+    if t == 9:
+        if voff + 12 > n: return -1
+        itype = struct.unpack_from('<I', buf, voff)[0]
+        cnt = struct.unpack_from('<Q', buf, voff + 4)[0]
+        off = voff + 12
+        for _ in range(min(cnt, 5_000_000)):
+            off = _adv_v3_elem(buf, off, itype)
+            if off == -1: return -1
+        return off
+    return -1
+
+def _adv_v3_elem(buf, off, itype):
+    n = len(buf)
+    if itype in (0, 1, 7): return off + 1 if off + 1 <= n else -1
+    if itype in (2, 3): return off + 2 if off + 2 <= n else -1
+    if itype in (4, 5, 6): return off + 4 if off + 4 <= n else -1
+    if itype in (10, 11, 12): return off + 8 if off + 8 <= n else -1
+    if itype == 8:
+        if off + 4 > n: return -1
+        ln = struct.unpack_from('<I', buf, off)[0]
+        if ln > 1_000_000: return -1
+        return off + 4 + ln if off + 4 + ln <= n else -1
+    return -1
+
 def _walk(buf, kv_count, spec, probe=False):
     """走查 KV 段（probe=True 只走前 3 条用于规格探测）。返回 (end_off, broken)"""
     n = len(buf)
     limit = 3 if probe else kv_count
-    off = 24
+    off = 24 if spec != 'v3' else 16
     for _ in range(min(limit, kv_count)):
-        key, off, ok = _str(buf, off)
+        if spec == 'v3':
+            key, off, ok = _str3(buf, off)
+        else:
+            key, off, ok = _str(buf, off)
         if not ok or off >= n:
             return off, True
-        if spec == 'new':
+        if spec in ('new', 'v3'):
             if off + 4 > n: return off, True
             t = struct.unpack_from('<I', buf, off)[0]
-            off = _adv_new(buf, off + 4, t)
+            off = (_adv_v3 if spec == 'v3' else _adv_new)(buf, off + 4, t)
         else:
             off = _adv_old(buf, off + 1, buf[off])
         if off == -1:
             return off, True
     return off, False
 
-def _detect_spec(buf, kv_count):
+def _detect_spec(buf, kv_count, version=2):
+    if version == 3:
+        return 'v3'
     for spec in ('new', 'old'):
         off, broken = _walk(buf, kv_count, spec, probe=True)
         if not broken:
@@ -211,6 +263,7 @@ class ModelHeader:
     last_tensor_bytes: int = 0                            # 上一张量字节数
     contig_violations: int = 0                            # 相邻 data_off 不连续的次数（应为 0）
     span_end: int = 0                                     # max(data_off + bytes)，≈ 文件大小
+    _tensor_entries: list = field(default_factory=list)    # [(name, dt, elems, data_off, bytes)] 全表（未知 dt gap 兜底用）
 
 QUANT_NAMES = {0: "F32", 1: "F16", 2: "Q4_0", 3: "Q4_1", 7: "Q8_0",
                8: "Q5_0", 9: "Q5_1", 10: "Q2_K", 11: "Q3_K_S", 12: "Q3_K_M",
@@ -355,6 +408,24 @@ def parse_gguf_header(path, max_read_mb=64):
     else:
         _scan_tensor_table(h, buf, off, tcnt)
 
+    # 11-28：新量化码（PQ2_0 族，如 dt=142）不在 _KBPP 表 → 上述计数为 0，
+    # 按 data_off 间隙兜底（tensor 表按文件顺序、张量连续排布：
+    # 未知 dt 的第 i 张量字节 = 下一张量 data_off - 本张量 data_off；末张量未知则放弃）
+    ents = h._tensor_entries
+    if ents and h.unknown_dts:
+        extra = 0
+        for i, (nm, dt, elems, doff, b) in enumerate(ents):
+            if dt in _KBPP or i + 1 >= len(ents):
+                continue
+            g = ents[i + 1][3] - doff
+            if g > 0:
+                extra += g
+                if ("_exps" in nm or ".exps." in nm):
+                    h.expert_bytes += g
+                else:
+                    h.other_bytes += g
+        h.tensor_bytes += extra
+
     # KV cache 字节/token（f16）
     # 混合注意力模型（full_attention_interval>1，如 Qwen3-Next：每 N 层 1 层 full-attn，
     # 其余走 SSM 线性注意力）只有部分层持有 KV，其余层的 SSM 状态是固定小缓冲、不随 ctx 增长。
@@ -468,6 +539,7 @@ def _consume_tensor_entry(h, buf, off, key):
     h.last_data_off = data_off
     h.last_tensor_bytes = b
     h.span_end = max(h.span_end, data_off + b)
+    h._tensor_entries.append((key, dt, elems, data_off, b))
     return off
 
 def _scan_tensor_table(h, buf, off, tcnt):

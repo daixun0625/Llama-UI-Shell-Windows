@@ -75,7 +75,7 @@ def _find_default_llama_server() -> str:
             return prod
     return VANILLA_BIN_FALLBACK
 VANILLA_BIN_DEFAULT = _find_default_llama_server()
-SKIP = ("mmproj", "clip", "whisper", "mtp", "lora")   # mtp=独立 MTP draft / lora=LoRA 适配器，均不进主模型库
+SKIP = ("mmproj", "clip", "whisper", "lora")   # 11-28 主人令：mtp 变体（如整模+MTP 的 -mtp.gguf）进主模型库
 
 # 配置文件（模型库路径、引擎路径等）
 import json as _json

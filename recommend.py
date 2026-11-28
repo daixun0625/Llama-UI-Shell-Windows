@@ -456,7 +456,9 @@ QUANT_BYTES = {
 
 def model_stats(h) -> dict:
     """把 gguf_fast.ModelHeader 归纳成推荐引擎需要的量。"""
-    file_gb = h.tensor_bytes / GiB
+    # 11-28：新量化码（PQ2_0 族，dt=142 等）解析器计 0 字节 → GB 列兜底取文件实长
+    # （Bonsai-2.5-27B PQ2_0 曾显示 0.1G，实际 6.76GiB）
+    file_gb = max(getattr(h, "size_gb", 0.0), h.tensor_bytes / GiB)
     expert_gb = h.expert_bytes / GiB
     layers = h.layers or 0
     is_moe = (h.expert_tensor_count > 0) or (h.expert_count > 0)
